@@ -16,6 +16,7 @@
 # under the terms of the Python Software Foundation License, version 2 or
 # later as published by the Python Software Foundation.
 # No warranty expressed or implied. See the file LICENSE.PSF-2 for details.
+import argparse
 import errno
 import inspect
 import logging
@@ -45,7 +46,7 @@ class DaemonRunnerStopError(RuntimeError, Exception):
 
 class DaemonRunner(object):
 
-    def __init__(self, callback, pidpath, timeout=1):
+    def __init__(self, callback, pidpath, timeout=1, parser=None):
         """
         Parameters
         ----------
@@ -66,57 +67,11 @@ class DaemonRunner(object):
         self.daemon_context = DaemonContext()
         self.daemon_context.pidfile = self.pidfile
 
-        self.actions = {
-            'start'   : self.start,
-            'stop'    : self.stop,
-            'restart' : self.restart,
-            'status'  : self.show_status,
-        }
+        self._parser = self._init_argparser(parser)
 
-    def start(self):
-        """Open the daemon context and run the application."""
-        if self._is_pidfile_stale():
-            self.pidfile.break_lock()
-
-        if self.pidfile.is_locked():
-            pid = self.pidfile.read_pid()
-            msg = 'Already running with pid: {0}\n'.format(pid)
-            self._emit_message(msg)
-        else:
-            msg = 'Starting\n'.format(os.getpid())
-            self._emit_message(msg, sys.stdout)
-
-            self.daemon_context.open()
-            self.callback()
-
-    def stop(self):
-        """Exit the daemon process specified in the current PID file."""
-        # If the current PID is stale, then breaks the lock and removes
-        # the PID file.
-        if self.pidfile.read_pid() is None:
-            self._emit_message('Not running\n')
-            return
-
-        if self._is_pidfile_stale():
-            self.pidfile.break_lock()
-        else:
-            self._terminate_daemon_process()
-            self._emit_message('Stopped\n', sys.stdout)
-
-    def restart(self):
-        """Stop, and then start."""
-        self.stop()
-        self.pidfile.break_lock()
-        self.start()
-
-    def show_status(self):
-        if self.pidfile.read_pid() is None:
-            self._emit_message('Not running\n', sys.stdout)
-        elif self.pidfile.is_locked():
-            pid = self.pidfile.read_pid()
-            self._emit_message('Running with pid: {0}\n'.format(pid), sys.stdout)
-        else:
-            self._emit_message('Unknown\n', sys.stdout)
+    def parse_args_and_run(self):
+        args = self._parser.parse_args()
+        args.func()
 
     def register_logger(self, logger):
         """Register a logger.
@@ -133,6 +88,51 @@ class DaemonRunner(object):
             if isinstance(lh, logging.FileHandler):
                 files_preserve.append(lh.stream)
         self.daemon_context.files_preserve = files_preserve
+
+    def _start(self):
+        """Open the daemon context and run the application."""
+        if self._is_pidfile_stale():
+            self.pidfile.break_lock()
+
+        if self.pidfile.is_locked():
+            pid = self.pidfile.read_pid()
+            msg = 'Already running with pid: {0}\n'.format(pid)
+            self._emit_message(msg)
+        else:
+            msg = 'Starting\n'.format(os.getpid())
+            self._emit_message(msg, sys.stdout)
+
+            self.daemon_context.open()
+            self.callback()
+
+    def _stop(self):
+        """Exit the daemon process specified in the current PID file."""
+        # If the current PID is stale, then breaks the lock and removes
+        # the PID file.
+        if self.pidfile.read_pid() is None:
+            self._emit_message('Not running\n')
+            return
+
+        if self._is_pidfile_stale():
+            self.pidfile.break_lock()
+        else:
+            self._terminate_daemon_process()
+            self._emit_message('Stopped\n', sys.stdout)
+
+    def _restart(self):
+        """Stop, and then start."""
+        self._stop()
+        self.pidfile.break_lock()
+        self._start()
+
+    def _show_status(self):
+        if self.pidfile.read_pid() is None:
+            self._emit_message('Not running\n', sys.stdout)
+        elif self.pidfile.is_locked():
+            pid = self.pidfile.read_pid()
+            self._emit_message('Running with pid: {0}\n'.format(pid), sys.stdout)
+        else:
+            self._emit_message('Unknown\n', sys.stdout)
 
     def _terminate_daemon_process(self):
         """Terminate the daemon process specified in the current PID file."""
@@ -161,6 +161,22 @@ class DaemonRunner(object):
     def _emit_message(self, msg, stream=sys.stderr):
         stream.write(msg)
         stream.flush()
+
+    def _init_argparser(self, parser=None):
+        if parser is None:
+            parser = argparse.ArgumentParser()
+        subparser = parser.add_subparsers()
+
+        p = subparser.add_parser('start', help='start')
+        p.set_defaults(func=self._start)
+        p = subparser.add_parser('stop', help= 'stop')
+        p.set_defaults(func=self._stop)
+        p = subparser.add_parser('restart', help='restart')
+        p.set_defaults(func=self._restart)
+        p = subparser.add_parser('status', help='show status')
+        p.set_defaults(func=self._show_status)
+
+        return parser
 
     @classmethod
     def _make_pidlockfile(cls, path, acquire_timeout):
