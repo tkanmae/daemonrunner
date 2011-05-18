@@ -68,6 +68,7 @@ class DaemonRunner(object):
         self.daemon_context.pidfile = self.pidfile
 
         self._parser = self._init_argparser(parser)
+        self._logger = None
 
     def parse_args_and_run(self):
         args = self._parser.parse_args()
@@ -83,11 +84,7 @@ class DaemonRunner(object):
         """
         if not isinstance(logger, logging.Logger):
             raise ValueError('logger must be a logging.Logger object')
-        files_preserve = []
-        for lh in logger.handlers:
-            if isinstance(lh, logging.FileHandler):
-                files_preserve.append(lh.stream)
-        self.daemon_context.files_preserve = files_preserve
+        self._logger = logger
 
     def _start(self):
         """Open the daemon context and run the application."""
@@ -99,6 +96,9 @@ class DaemonRunner(object):
             msg = 'Already running with pid: {0}\n'.format(pid)
             self._emit_message(msg)
         else:
+            if self._logger is not None:
+                self._preserve_logging_file_handler()
+
             msg = 'Starting\n'.format(os.getpid())
             self._emit_message(msg, sys.stdout)
 
@@ -142,6 +142,16 @@ class DaemonRunner(object):
         except OSError:
             msg = 'Failed to terminate: {0}'.format(pid)
             raise DaemonRunnerStopError(msg)
+
+    def _preserve_logging_file_handler(self):
+        # Ensure there is no duplicate in the files_preserve.
+        current = self.daemon_context.files_preserve
+        current = set(current) if current is not None else set()
+
+        handlers = set(lh.stream for lh in self._logger.handlers
+                       if isinstance(lh, logging.FileHandler))
+
+        self.daemon_context.files_preserve = list(current.union(handlers))
 
     def _is_pidfile_stale(self):
         """Return True if the current PID file is stale."""
