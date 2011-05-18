@@ -73,8 +73,6 @@ class DaemonRunner(object):
             'status'  : self.show_status,
         }
 
-        self._on_restart = False
-
     def start(self):
         """Open the daemon context and run the application."""
         if self._is_pidfile_stale():
@@ -82,13 +80,12 @@ class DaemonRunner(object):
 
         if self.pidfile.is_locked():
             pid = self.pidfile.read_pid()
-            if not self._on_restart:
-                msg = 'Already running with pid: {0}\n'.format(pid)
-                self._emit_message(msg)
+            msg = 'Already running with pid: {0}\n'.format(pid)
+            self._emit_message(msg)
         else:
-            if not self._on_restart:
-                msg = 'Starting with pid: {0}\n'.format(os.getpid())
-                self._emit_message(msg, sys.stdout)
+            msg = 'Starting\n'.format(os.getpid())
+            self._emit_message(msg, sys.stdout)
+
             self.daemon_context.open()
             self.callback()
 
@@ -97,26 +94,20 @@ class DaemonRunner(object):
         # If the current PID is stale, then breaks the lock and removes
         # the PID file.
         if self.pidfile.read_pid() is None:
-            if not self._on_restart:
-                self._emit_message('Not running\n')
+            self._emit_message('Not running\n')
             return
 
         if self._is_pidfile_stale():
             self.pidfile.break_lock()
         else:
             self._terminate_daemon_process()
-        if not self._on_restart:
             self._emit_message('Stopped\n', sys.stdout)
 
     def restart(self):
         """Stop, and then start."""
-        self._on_restart = True
-        self._emit_message('Restarting with pid: {0}\n'.format(os.getpid()))
-        try:
-            self.stop()
-            self.start()
-        finally:
-            self._on_restart = False
+        self.stop()
+        self.pidfile.break_lock()
+        self.start()
 
     def show_status(self):
         if self.pidfile.read_pid() is None:
