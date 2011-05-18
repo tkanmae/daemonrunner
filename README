@@ -1,0 +1,3 @@
+A wrapper for daemon.DaemonContext based on daemon.runner.DaemonRunner in
+python-daemon package.  This module is compatible with python-daemon>=0.1.6.
+
